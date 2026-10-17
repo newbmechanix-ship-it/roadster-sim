@@ -1,0 +1,215 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Roadster Model Preview</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #0d0e10; overflow: hidden; font-family: system-ui, sans-serif; }
+  #ref { position: absolute; left: 0; top: 0; display: none; pointer-events: none; }
+  canvas { position: absolute; left: 0; top: 0; display: block; }
+  vite-error-overlay { display: none !important; } /* other sessions edit src/ live; keep captures clean */
+  #hud { position: absolute; left: 10px; top: 8px; color: #ddd; font-size: 12px; line-height: 1.5; background: rgba(0,0,0,.45); padding: 6px 9px; border-radius: 6px; white-space: pre; pointer-events: none; }
+</style>
+</head>
+<body>
+<img id="ref" alt="" />
+<div id="hud">loading…</div>
+<script type="module">
+import * as THREE from 'three/webgpu';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+import { createRoadster } from './src/car/RoadsterModel.js';
+
+const params = new URLSearchParams(location.search);
+const state = {
+  trim: params.get('trim') || 'thrust',
+  wheel: params.get('wheel') || 'spoke',
+  view: params.get('view') || 'q34',
+  doors: parseFloat(params.get('doors') || '0'),
+  doorTarget: parseFloat(params.get('doors') || '0'),
+  wingRaised: parseFloat(params.get('raise') || '0.85'), // cruise values sent by main.js (wing deployed above ~50 mph)
+  wingAngle: parseFloat(params.get('angle') || '-0.35'),
+  deploy: parseFloat(params.get('deploy') || '1'), deployTarget: parseFloat(params.get('deploy') || '1'),
+  overlay: params.get('overlay') || '',
+  opacity: parseFloat(params.get('opacity') || '0.55'),
+  bg: params.get('bg') || '',
+};
+
+const renderer = new THREE.WebGPURenderer({ antialias: true, alpha: true, forceWebGL: params.has('webgl') });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.0;
+renderer.shadowMap.enabled = true;
+document.body.appendChild(renderer.domElement);
+await renderer.init();
+
+const scene = new THREE.Scene();
+const pmrem = new THREE.PMREMGenerator(renderer);
+scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+scene.environmentIntensity = parseFloat(params.get('env') || '0.5');
+
+const hemi = new THREE.HemisphereLight(0xdfe6ff, 0x202020, 0.6);
+scene.add(hemi);
+const sun = new THREE.DirectionalLight(0xffffff, 2.2);
+sun.position.set(4, 7, 3);
+sun.castShadow = true;
+sun.shadow.mapSize.set(2048, 2048);
+sun.shadow.bias = -0.0004;
+sun.shadow.normalBias = 0.03;
+Object.assign(sun.shadow.camera, { left: -4, right: 4, top: 4, bottom: -4, near: 0.5, far: 20 });
+scene.add(sun);
+const rim = new THREE.DirectionalLight(0xffe0d0, 0.9);
+rim.position.set(-5, 3, -6);
+scene.add(rim);
+
+const ground = new THREE.Mesh(new THREE.CircleGeometry(14, 64).rotateX(-Math.PI / 2),
+  new THREE.MeshStandardMaterial({ color: 0x2a2b2e, roughness: 0.92 }));
+ground.receiveShadow = true;
+scene.add(ground);
+
+const persp = new THREE.PerspectiveCamera(32, 1, 0.02, 200);
+const ortho = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 100);
+let camera = persp;
+const controls = new OrbitControls(persp, renderer.domElement);
+controls.target.set(0, 0.55, 0);
+controls.enableDamping = true;
+
+let car = null;
+function build() {
+  if (car) scene.remove(car);
+  const t0 = performance.now();
+  car = createRoadster({ trim: state.trim, wheelStyle: state.wheel });
+  const ms = (performance.now() - t0).toFixed(1);
+  scene.add(car);
+  let tris = 0, meshes = 0;
+  car.traverse((o) => { if (o.isMesh) { meshes++; const g = o.geometry; tris += (g.index ? g.index.count : g.attributes.position.count) / 3; } });
+  state.stats = { tris: Math.round(tris), meshes, ms };
+  for (const n of (params.get('hide') || '').split(',').filter(Boolean)) car.traverse((o) => { if (o.name.startsWith(n)) o.visible = false; }); // debug: hide parts by name prefix
+  applyAnim();
+}
+function applyAnim() {
+  const p = car.userData.parts;
+  p.doors.left.userData.open(state.doors);
+  p.doors.right.userData.open(state.doors);
+  if (p.wing) { p.wing.userData.setRaised(state.wingRaised); p.wing.userData.setAngle(state.wingAngle); p.wing.userData.setDeploy?.(state.deploy); }
+}
+
+// Reference overlays: image, its pixel size, and where the car sits in it (for an exact ortho match).
+// Reference images are not distributed with this repo; drop your own into public/refs/.
+// side: side-profile photo measured at 2000 px width: nose x=420, tail x=1357 (4.39 m), ground y=716
+const REFS = {
+  side: { src: '/refs/side.jpg', w: 2000, h: 1011, mpp: 4.39 / 937, noseX: 420, groundY: 716 },
+  side2: { src: '/refs/side2.png', w: 1082, h: 570, mpp: 4.39 / 945, noseX: 60, groundY: 482 },
+};
+
+const VIEWS = {
+  side:  { pos: [9.5, 0.75, 0.0], tgt: [0, 0.55, 0], fov: 28 },
+  sider: { pos: [-9.5, 0.75, 0.0], tgt: [0, 0.55, 0], fov: 28 },
+  rear:  { pos: [0, 1.2, -8.5], tgt: [0, 0.6, 0], fov: 26 },
+  front: { pos: [0, 1.0, 8.5], tgt: [0, 0.55, 0], fov: 26 },
+  q34:   { pos: [5.2, 1.9, 5.4], tgt: [0, 0.5, 0], fov: 32 },
+  r34:   { pos: [5.0, 1.8, -5.6], tgt: [0, 0.55, -0.2], fov: 32 },
+  rlow:  { pos: [-3.6, 0.9, -5.2], tgt: [0, 0.55, -0.6], fov: 34 },
+  top:   { pos: [0.01, 11, 0], tgt: [0, 0, 0], fov: 30 },
+  cockpit: { pos: [0.35, 0.93, -0.1], tgt: [0.35, 0.85, 2.0], fov: 70 },
+  hero:  { pos: [0, 2.5, -7.8], tgt: [0, 0.5, 0], fov: 22 },
+  frontlow: { pos: [2.4, 0.9, 6.0], tgt: [0, 0.5, 0.4], fov: 32 },
+};
+
+function setView(name) {
+  state.view = name;
+  const ref = document.getElementById('ref');
+  if (REFS[name] || state.overlay) {
+    const R = REFS[state.overlay || name] || REFS.side;
+    camera = ortho;
+    // camera on +X looking at -X: screen right = -Z, front of car on the left (as in the photos)
+    const zLeft = 2.255 + R.noseX * R.mpp;
+    const yTop = R.groundY * R.mpp;
+    ortho.left = -zLeft; ortho.right = -zLeft + R.w * R.mpp;
+    ortho.top = yTop; ortho.bottom = yTop - R.h * R.mpp;
+    ortho.position.set(20, 0, 0); ortho.up.set(0, 1, 0); ortho.lookAt(0, 0, 0);
+    ortho.updateProjectionMatrix();
+    ref.src = R.src; ref.style.display = 'block';
+    renderer.domElement.style.opacity = params.has('sil') ? '1' : String(state.opacity);
+    if (params.has('sil')) scene.overrideMaterial = new THREE.MeshBasicMaterial({ color: 0xff2020, transparent: true, opacity: state.opacity, depthWrite: true });
+    ground.visible = false;
+    state.refAspect = R.w / R.h;
+  } else {
+    camera = persp;
+    ref.style.display = 'none';
+    renderer.domElement.style.opacity = '1';
+    ground.visible = true;
+    state.refAspect = 0;
+    const v = VIEWS[name] || VIEWS.q34;
+    persp.position.set(...v.pos); persp.fov = v.fov; controls.target.set(...v.tgt);
+    if (name === 'cockpit' && car) { const e = car.userData.cockpitEye; persp.position.set(e[0], e[1], e[2]); controls.target.set(e[0], e[1] - 0.08, e[2] + 2); }
+    persp.updateProjectionMatrix(); controls.update();
+  }
+  resize();
+}
+
+function resize() {
+  let w = innerWidth, h = innerHeight;
+  if (state.refAspect) {
+    if (w / h > state.refAspect) w = Math.round(h * state.refAspect); else h = Math.round(w / state.refAspect);
+    const ref = document.getElementById('ref');
+    ref.style.width = w + 'px'; ref.style.height = h + 'px';
+  }
+  renderer.setSize(w, h);
+  persp.aspect = persp.view && persp.view.enabled ? persp.view.fullWidth / persp.view.fullHeight : w / h; persp.updateProjectionMatrix();
+}
+addEventListener('resize', resize);
+
+addEventListener('keydown', (e) => {
+  const k = e.key.toLowerCase();
+  if (k === '1') { state.trim = 'performance'; build(); }
+  if (k === '2') { state.trim = 'thrust'; build(); }
+  if (k === '3') { state.trim = 'rocket'; build(); }
+  if (k === 'w') { state.wheel = state.wheel === 'spoke' ? 'aero' : 'spoke'; build(); }
+  if (k === 'd') state.doorTarget = state.doorTarget > 0.5 ? 0 : 1;
+  if (k === 'g') { state.wingRaised = state.wingRaised > 0.9 ? 0.85 : 1; applyAnim(); }
+  if (k === 'b') state.deployTarget = state.deployTarget > 0.5 ? 0 : 1; // stow / deploy the deck-panel wing
+  if (k === '[') { state.wingAngle -= 0.05; applyAnim(); }
+  if (k === ']') { state.wingAngle += 0.05; applyAnim(); }
+  if (k === 'c') { setView('cockpit'); return; }
+  const vk = { s: 'side', a: 'sider', r: 'rear', f: 'front', q: 'q34', e: 'r34', t: 'top', z: 'rlow', x: 'frontlow', o: 'side', p: 'side2' }[k];
+  if (vk) { if (k !== 'o' && k !== 'p') state.overlay = ''; setView(vk); }
+});
+
+build();
+setView(state.view);
+// camera match: cam=px,py,pz,tx,ty,tz,vfov[,ux,uy,uz]  (from a solved reference camera)
+const camFixed = params.has('cam');
+if (camFixed) {
+  const c = params.get('cam').split(',').map(Number);
+  if (c.length >= 10) persp.up.set(c[7], c[8], c[9]);
+  persp.position.set(c[0], c[1], c[2]); persp.fov = c[6]; persp.lookAt(c[3], c[4], c[5]);
+  if (params.has('vo')) { const o = params.get('vo').split(',').map(Number); persp.aspect = o[0] / o[1]; persp.setViewOffset(o[0], o[1], o[2], o[3], o[4], o[5]); } // off-centre principal point
+  persp.updateProjectionMatrix();
+}
+if (params.has('nohud')) document.getElementById('hud').style.display = 'none';
+const clock = new THREE.Clock();
+renderer.setAnimationLoop(() => {
+  const dt = clock.getDelta();
+  if (Math.abs(state.doors - state.doorTarget) > 1e-3) {
+    state.doors += Math.sign(state.doorTarget - state.doors) * Math.min(dt * 0.8, Math.abs(state.doorTarget - state.doors));
+    applyAnim();
+  }
+  if (params.has('spin')) for (const w of Object.values(car.userData.parts.wheels)) w.userData.spin.rotation.x += dt * 3;
+  if (Math.abs(state.deploy - state.deployTarget) > 1e-3) {
+    state.deploy += Math.sign(state.deployTarget - state.deploy) * Math.min(dt, Math.abs(state.deployTarget - state.deploy));
+    applyAnim();
+  }
+  if (camera === persp && !camFixed) controls.update();
+  renderer.render(scene, camera);
+  const s = state.stats;
+  document.getElementById('hud').textContent =
+    `trim ${state.trim}  wheels ${state.wheel}  view ${state.view}\n` +
+    `${s.tris.toLocaleString()} tris  ${s.meshes} meshes  built in ${s.ms} ms  (${renderer.backend.isWebGPUBackend ? 'WebGPU' : 'WebGL2'})\n` +
+    `1/2/3 trim  W wheels  D doors  B wing stow/deploy  G wing raise  [ ] wing angle\nS side  A side(R)  R rear  F front  Q 3/4 front  E 3/4 rear  Z rear low  X front low  T top  C cockpit  O/P photo overlay`;
+});
+window.__car = () => car;
+</script>
+</body>
+</html>

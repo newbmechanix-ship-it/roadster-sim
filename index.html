@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Roadster Simulator</title>
+<link rel="stylesheet" href="/src/style.css" />
+</head>
+<body>
+<canvas id="c"></canvas>
+
+<div id="hud" class="hidden">
+  <div id="topbar">
+    <button class="chip clickable" id="trimChip" title="Open menu (Esc)">THRUST</button>
+    <button class="chip clickable" id="camChip" title="Next camera (C)">Chase</button>
+    <button class="chip clickable" id="dayChip" title="Day / night (N)">NIGHT</button>
+    <button class="chip clickable" id="soundChip" title="Mute (M)">SOUND ON</button>
+    <button class="chip clickable" id="fxChip" title="Thruster FX editor (K)">FX EDITOR</button>
+    <div class="chip" id="rendererChip">WebGPU</div>
+  </div>
+
+  <div id="timing">
+    <div class="tlabel">LAUNCH TIMER</div>
+    <div class="trow"><span>0–60 mph</span><b id="t60">—</b></div>
+    <div class="trow"><span>0–100 mph</span><b id="t100">—</b></div>
+    <div class="trow"><span>¼ mile</span><b id="tq">—</b></div>
+    <div class="trow best"><span>Best 0–60</span><b id="b60">—</b></div>
+    <div class="tclaim" id="claim">Tesla claim: &lt; 0.9 s</div>
+  </div>
+
+  <canvas id="minimap" width="180" height="180"></canvas>
+
+  <div id="dash">
+    <div id="gmeter"><canvas id="gcanvas" width="110" height="110"></canvas><div id="gval">0.0 g</div></div>
+    <div id="speedo">
+      <div id="speed">0</div>
+      <div id="unit">MPH</div>
+      <div id="kmh">0 km/h</div>
+      <div id="gear">P</div>
+    </div>
+    <div id="systems">
+      <div class="sys"><span>AIR TANK</span><div class="bar"><i id="tankBar"></i></div></div>
+      <div class="sys"><span>THRUST</span><div class="bar"><i id="thrustBar" class="hot"></i></div></div>
+      <div class="flags">
+        <button class="flag clickable" id="fanFlag" title="Suction fan on/off (F)">FAN</button>
+        <button class="flag clickable" id="wingFlag" title="Wing mode (G)">WING AUTO</button>
+        <div class="flag" id="airFlag">AIR</div>
+        <button class="flag clickable" id="assistFlag" title="Jet assist on/off (J): fires only above ~120 mph under hard braking/cornering">JET ASSIST</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="toast"></div>
+  <div id="hint">WASD drive · SHIFT thrust · E lift · SPACE jump (hold: hover) · Q kickflip · B handbrake · T super recharger · C camera · H help</div>
+</div>
+
+<div id="menu">
+  <div class="menu-inner">
+    <div class="brand">T E S L A</div>
+    <h1>ROADSTER</h1>
+    <div class="sub">Simulator · Revealed Oct 15, 2026</div>
+    <div id="trims"></div>
+    <div class="menu-actions">
+      <button id="startBtn">DRIVE</button>
+      <button id="fxMenuBtn" class="secondary">THRUSTER FX EDITOR</button>
+    </div>
+    <div id="controls">
+      <div><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> / arrows: drive. In the air (Rocket): pitch and roll</div>
+      <div><kbd>Shift</kbd> rear cold-gas thrusters</div>
+      <div><kbd>E</kbd> lift thrusters (Rocket: hover/fly) · <kbd>Q</kbd> kickflip (Rocket)</div>
+      <div><kbd>Space</kbd> tap: jump, hold: vertical thrusters (Rocket) · <kbd>B</kbd> handbrake / drift · <kbd>F</kbd> suction fan · <kbd>G</kbd> wing mode (auto / track / low drag; retractable wing) · <kbd>J</kbd> jet assist (Rocket, 120+ mph)</div>
+      <div><kbd>C</kbd> camera · <kbd>V</kbd> doors · <kbd>R</kbd> reset · <kbd>P</kbd> teleport (launch lane / Semi jump / vertical ramp) · <kbd>T</kbd> super recharger on/off · <kbd>N</kbd> day/night · <kbd>K</kbd> thruster FX editor · <kbd>M</kbd> mute · <kbd>Esc</kbd> menu</div>
+      <div>Gamepad supported: RT/LT, left stick, A handbrake, RB thrust, Y lift, B kickflip</div>
+    </div>
+    <div class="note">Specs per Tesla's reveal. Mass, power and top speed for Performance/Thrust are game estimates.</div>
+  </div>
+</div>
+
+<div id="loading">Initializing renderer…</div>
+<script type="module" src="/src/main.js"></script>
+</body>
+</html>
